@@ -1,15 +1,80 @@
 # Agent usage
 
-The development assistant helped design and implement the TypeScript workbench, tests, and documentation. Representative development prompts concerned dynamic source and target schemas, selected transformation rules, deterministic dry-run behavior, approval before execution, SQLite retry and rollback semantics, and the Gemini integration. The synthetic customer fields are example inputs chosen for this implementation, not externally supplied records.
+## Tools and responsibility
 
-The user requested public access after deployment. The reviewer-key sign-in screen, browser-session credentials, API key check, production secret requirement, and Blueprint secret generation were removed. The public website and API share one workbench; approval of the exact plan and dry run still gates execution. API tests check access without reviewer headers while preserving the approval, retry, reconciliation, and rollback checks.
+A coding assistant helped design and implement the React/TypeScript frontend,
+Fastify API, deterministic migration engine, database repositories, tests, and
+deployment documentation. Tools included the local terminal, TypeScript compiler,
+Vitest, Git/GitHub CLI, Chrome browser automation, and official hosting/API
+documentation. No work was delegated to subagents. The implementation and its
+limits must still be understood and owned by the developer.
 
-No work was delegated to another agent. During validation, the default Vitest command looked under the Vite frontend root and found no tests; the test script was corrected to use the repository root. The deployment image has not been built locally because the Docker engine is unavailable here.
+## Representative prompts
 
-For Render Free deployment, Codex added a PostgreSQL repository selected by `DATABASE_URL`, keeping SQLite available locally. The API and AI inspection dispatcher await repository operations. PostgreSQL operations use parameterized queries, database transactions, and a transaction-scoped advisory lock to preserve this workbench's shared-state approval and execution rules. Accepted target rows are inserted in one batch to avoid a network round trip per row. A Render Blueprint and a Neon setup guide were added; Render startup rejects a missing `DATABASE_URL` to prevent losing SQLite data on the free host's temporary filesystem. The user authorized publishing the app to their GitHub repository.
+These are paraphrased development requests, not a transcript:
 
-PostgreSQL workflow tests use the local PGlite PostgreSQL engine. They cover approval gating, rejected-row acknowledgement, stale digests and versions, target changes, concurrent retries, reconciliation, rollback, partial-write failure and failed-attempt recording, snapshot restoration, and the async API/AI inspection path. PGlite has one serialized connection, so production advisory locking across separate server connections and live Neon connectivity still require hosted verification. A test initially failed during Windows temporary-directory cleanup; persistence verification was changed to export and restore the PostgreSQL data directory as an archive. No live deployment or Docker image build is claimed by these local checks.
+- Build a bounded migration workflow with AI-proposed mappings, deterministic
+  validation, and explicit approval before execution.
+- Let users supply source/target schemas, sample records, and selected supported
+  rules, then freeze each saved input snapshot.
+- Preserve plan versions and field-level rejection evidence; make retries safe,
+  reconcile totals, and support rollback without removing history.
+- Deploy the app on Render Free with durable Neon storage and automatic updates
+  from the GitHub deployment branch.
+- Remove the reviewer-key entry screen and make the website/API public, while
+  retaining approval of the exact migration plan before execution.
 
-At runtime, the server uses five read-only inspection and validation tools: it supplies bounded schema, profile, and rule results to the configured Gemini model, which proposes all field mappings, rationales, risks, assumptions, and clarification questions. The server validates the exact proposal, runs its deterministic preview, and requests one correction if needed. Unsupported mappings and rules are rejected. The model cannot execute or roll back a migration. The frontend automatically shows the plan and dry run; at final review, a reviewer may request an AI revision and must explicitly approve before the server writes to the mock target.
+## Runtime AI boundary
 
-Important validation choices were checked with focused tests and local browser checks. For example, rejected sample rows remain quarantined, a retry adds zero records, and rollback removes only records from its execution. The AI route has contract tests with a fake model client. Before the provider switch, a live OpenRouter run with Cohere North Mini Code's free endpoint completed a valid seven-field plan using only synthetic records and all five read-only workflow tools. Several free-model attempts failed through rate limiting, timeout, or malformed plan shape; the server rejected them without writing target rows. After the provider switch, a live Gemini 3.5 Flash-Lite run completed a validated seven-field plan with all five inspection and validation tools using only synthetic records. Gemini 3.8 Flash returned HTTP 503 twice with the same key, so Flash-Lite is the tested default. Browser testing found that Gemini sometimes wrapped JSON in Markdown and returned assumptions as objects or rationales for only changed fields during a revision. The planner now accepts those safe shapes, carrying prior explanations only for mappings that are unchanged. A new focused test covers this repair. A full isolated browser run verified AI feedback, approval, execution, retry, reconciliation, rollback, and persistence after reload. Model suggestions are proposals, never trusted as executable instructions.
+The server orchestrates five read-only tools: schema inspection, source profiling,
+selected-rule listing, mapping validation, and mapping preview. It supplies the
+bounded inspection results to Gemini, validates the returned full proposal, runs a
+deterministic preview, and requests one correction if validation fails. This is an
+LLM workflow with server-controlled inspection, rather than unrestricted autonomous
+tool selection. The model cannot execute migrations or run arbitrary code.
+
+Schemas and allowed rules remain under user control. AI proposals include field
+mappings, explanations, risks, assumptions, and clarification questions. The server
+checks blocking answers, rejected-row acknowledgement, plan/dry-run digests, latest
+version, and target state before execution. Source data is treated as untrusted
+content. Only synthetic records were used for live model verification.
+
+## Mistakes and rejected approaches
+
+- Vitest initially searched under the frontend root and found no tests. The test
+  command now explicitly uses the repository root.
+- Some model responses contained unsupported or incomplete mappings, timed out, or
+  hit quota limits. Invalid drafts were rejected; they never became executable
+  target writes. One repair attempt is allowed.
+- Gemini sometimes returned fenced JSON, a target-keyed plan, or partial revision
+  explanations. Parsing accepts these bounded shapes while still validating every
+  mapping. Prior explanations are retained only for unchanged mappings.
+- Local SQLite on Render Free would lose history on restart. The hosted app uses
+  PostgreSQL through `DATABASE_URL`; startup on Render rejects a missing URL.
+- The original entry screen opened before checking access. This was corrected,
+  then the entry-key mechanism was removed at the user's explicit request for a
+  public shared workbench. Migration approval remains separate from website access.
+- A PGlite persistence test hit Windows temporary-directory cleanup failures. It
+  now exports and restores a PostgreSQL data-directory snapshot.
+
+## Verification
+
+The local suite contains 30 tests covering transformations and error evidence,
+custom schemas and selected rules, approval gating, immutable versions, stale
+state, AI tool restrictions and repair, duplicate-safe retries, reconciliation,
+rollback, persistence, and atomic insertion failure. Type checks cover frontend
+and backend; the production build compiles both. Model contract tests use a fake
+client and are distinguished from live provider testing.
+
+On the hosted app, a real Gemini proposal and a requested email-normalization
+revision created plan versions 1 and 2. The synthetic dry run reported 20 source,
+18 transformed, 14 accepted, and 6 quarantined rows. The test explicitly approved the exact plan before execution;
+14 mock target rows were committed with matched totals, and retry added zero rows.
+Render successfully built the Docker image, connected to Neon, and automatically
+deployed a GitHub push. No application submission was made during these checks.
+
+PostgreSQL unit/integration tests use PGlite's local PostgreSQL engine and a
+serialized test connection. Production uses pooled connections and a
+transaction-scoped advisory lock. The tests do not establish production load
+capacity or prove every possible concurrency case. The public demo shares state
+and AI quota across visitors and is intended for synthetic review data.

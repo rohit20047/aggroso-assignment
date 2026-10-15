@@ -140,6 +140,8 @@ The automated suite exercises SQLite and PostgreSQL workflow behavior. PostgreSQ
 tests run with PGlite, a local PostgreSQL engine, covering rollback, stale approvals,
 concurrent requests, API/AI inspection, and restoring a persisted database snapshot.
 The test pool serializes its single connection; production uses transaction-scoped
-PostgreSQL advisory locks across pooled connections. Hosted Neon connectivity,
-cross-connection locking, the Docker image build, and the live deployment still
-need verification in the deployment environment.
+PostgreSQL advisory locks across pooled connections. The hosted Docker build,
+Neon connectivity, real Gemini planning/revision, committed reconciliation, and
+duplicate-safe retry have also been verified on the live service. These checks
+do not establish production load capacity or exhaustively test cross-connection
+concurrency.
