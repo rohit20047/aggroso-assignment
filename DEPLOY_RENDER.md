@@ -90,6 +90,31 @@ Render's disposable local filesystem.
 The same workbench is shared by everyone using its reviewer key. Use synthetic
 data for the hosted demo. Keep it available until review is complete.
 
+## Automatic updates from GitHub
+
+Render must use the connected **Git Provider** source for this repository to
+receive push events. A service created from the **Public Git Repository** URL
+requires manual deployment even if its Auto-Deploy field displays On Commit.
+
+1. In Render, open the service's **Settings → Build → Source → Edit**.
+2. Choose **Git Provider**. Under **Credentials**, configure the existing Render
+   GitHub app to include `rohit20047/aggroso-assignment` in its selected repositories.
+3. Select that repository as the service source. Keep the branch set to
+   `render-neon-deploy` and **Auto-Deploy → On Commit**.
+4. The Blueprint explicitly sets `branch: render-neon-deploy` and
+   `autoDeployTrigger: commit` to retain that behavior on future syncs.
+5. Commit and push changes to that branch. Render should start a deploy for the
+   new commit automatically. Check its **Deploys** page for the commit hash and
+   Git-triggered deployment before calling the integration verified.
+
+```sh
+git add <changed-files>
+git commit -m "Describe the change"
+git push origin render-neon-deploy
+```
+
+Reference: [Render automatic deploys](https://render.com/docs/deploys#automatic-deploys).
+
 ## Troubleshooting
 
 - **`DATABASE_URL is required on Render`:** Add the Neon connection string to

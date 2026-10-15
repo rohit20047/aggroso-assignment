@@ -3,6 +3,8 @@ services:
     name: migration-workbench
     runtime: docker
     plan: free
+    branch: render-neon-deploy
+    autoDeployTrigger: commit
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
