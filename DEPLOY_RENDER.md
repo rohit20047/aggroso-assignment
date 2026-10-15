@@ -13,7 +13,7 @@ Create a GitHub repository and push this project, including the latest changes a
 excludes `.env`, local databases, build outputs, and private assignment notes.
 Check the files before pushing. For this project, use
 [`rohit20047/aggroso-assignment`](https://github.com/rohit20047/aggroso-assignment)
-and select the `codex/render-neon-deploy` branch in Render.
+and select the `render-neon-deploy` branch in Render.
 
 ## 2. Create the free Neon database
 
