@@ -1,0 +1,12 @@
+# Private assessment notes and local document QA files
+PROJECT_INSTRUCTIONS.md
+Implementation Plan.docx
+plan.md
+.artifacts/
+node_modules/
+dist/
+dist-web/
+.env
+*.db
+*.db-shm
+*.db-wal

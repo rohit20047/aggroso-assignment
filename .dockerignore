@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-web
+*.db
+*.db-shm
+*.db-wal
+.env
+.git
+.artifacts
+PROJECT_INSTRUCTIONS.md
+plan.md
+Implementation Plan.docx
