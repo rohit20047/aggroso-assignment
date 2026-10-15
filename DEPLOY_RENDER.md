@@ -39,11 +39,9 @@ and select the `render-neon-deploy` branch in Render.
    | `GEMINI_API_KEY` | Your existing Gemini API key |
 
 5. Confirm the service uses **Free**, then deploy. The Blueprint supplies
-   `NODE_ENV=production`, sets the current Gemini model default, generates a
-   reviewer secret, and uses `/health` as the health check.
-6. After creation, open the service's **Environment** settings and reveal/copy
-   the generated `REVIEWER_ACCESS_SECRET`. Use that value in the app's reviewer
-   access field. Keep it private, apart from the intended reviewer.
+   `NODE_ENV=production`, sets the current Gemini model default, and uses
+   `/health` as the health check.
+6. Open the service URL. The workbench opens directly without a login or access key.
 
 The Dockerfile builds both frontend and API using Node.js 22. No separate static
 site, build command, start command, disk, or frontend API URL is needed. Render
@@ -61,14 +59,8 @@ If you use **New → Web Service**, connect the same repository and select:
 | Instance type | Free |
 | Health check path | `/health` |
 
-Add `DATABASE_URL`, `GEMINI_API_KEY`, `NODE_ENV=production`,
-`GEMINI_MODEL=gemini-3.5-flash-lite`, and a long random
-`REVIEWER_ACCESS_SECRET` under Environment. PowerShell can generate a reviewer
-secret locally with:
-
-```powershell
-node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
-```
+Add `DATABASE_URL`, `GEMINI_API_KEY`, `NODE_ENV=production`, and
+`GEMINI_MODEL=gemini-3.5-flash-lite` under Environment.
 
 The local `DATABASE_PATH` setting is unused when `DATABASE_URL` is set. The app
 refuses to start on Render without `DATABASE_URL`, preventing accidental use of
@@ -78,7 +70,7 @@ Render's disposable local filesystem.
 
 1. Wait for **Live**, then open the service's `https://…onrender.com` address.
    `/health` should return `{"status":"ok"}`.
-2. Enter the reviewer access secret. Load the bundled synthetic example.
+2. The workbench should open directly. Load the bundled synthetic example.
 3. Generate an AI plan; inspect its dry run and rejected rows. The unmodified
    bundled mapping accepts 14 of the 20 sample records and rejects 6.
 4. Answer any blocking questions, acknowledge rejected rows, and approve.
@@ -87,8 +79,9 @@ Render's disposable local filesystem.
    target rows, and audit history should still be present in Neon.
 7. Roll back and confirm the execution's rows are removed while history remains.
 
-The same workbench is shared by everyone using its reviewer key. Use synthetic
-data for the hosted demo. Keep it available until review is complete.
+The website and API are public, and all visitors share the same workbench and
+saved history. Plan approval is still required before migration execution.
+Use synthetic data for the hosted demo. Keep it available until review is complete.
 
 ## Automatic updates from GitHub
 
@@ -122,8 +115,8 @@ Reference: [Render automatic deploys](https://render.com/docs/deploys#automatic-
 - **Database connection or SSL failure:** Copy a fresh connection string from
   Neon, including its SSL query parameters. Confirm that the password and database
   name are correct. Do not disable SSL verification to work around it.
-- **401 / Reviewer access required:** Use the current Render environment value
-  of `REVIEWER_ACCESS_SECRET` in the app.
+- **Old access-key screen:** Refresh after the latest deployment is Live. The app
+  no longer uses an access key or browser-session sign-in state.
 - **AI unavailable:** Check `GEMINI_API_KEY`, model access, and the provider's
   quota. Review Render logs for the error. Gemini free-tier eligibility and quotas
   are separate from hosting.

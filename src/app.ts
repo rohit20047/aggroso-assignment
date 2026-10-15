@@ -1,4 +1,3 @@
-import { timingSafeEqual } from 'node:crypto';
 import Fastify from 'fastify';
 import { z, ZodError } from 'zod';
 import { AgentPlanner } from './agent.js';
@@ -16,14 +15,7 @@ const approvalBody = z.object({
     acknowledgeRejected: z.boolean(),
     answers: z.record(z.string(), z.string().max(1000)).optional(),
 });
-function equalSecret(received: string | undefined, expected: string): boolean {
-    if (!received)
-        return false;
-    const left = Buffer.from(received);
-    const right = Buffer.from(expected);
-    return left.length === right.length && timingSafeEqual(left, right);
-}
-export function buildApp(store: MigrationRepository, reviewerSecret?: string, agent?: AgentPlanner) {
+export function buildApp(store: MigrationRepository, agent?: AgentPlanner) {
     const app = Fastify({ logger: true, bodyLimit: MAX_UPLOAD_BYTES + 8192 });
     app.setErrorHandler((error, request, reply) => {
         if (error instanceof ZodError) {
@@ -45,14 +37,6 @@ export function buildApp(store: MigrationRepository, reviewerSecret?: string, ag
         reply.code(status).send({ code: status === 500 ? 'INTERNAL_ERROR' : 'WORKFLOW_ERROR', message: status === 500 ? 'Unexpected server error' : message, requestId: request.id });
     });
     app.get('/health', async () => ({ status: 'ok' }));
-    app.addHook('preHandler', async (request, reply) => {
-        if (!request.url.startsWith('/api/') || !reviewerSecret)
-            return;
-        const supplied = request.headers['x-reviewer-key'];
-        if (!equalSecret(typeof supplied === 'string' ? supplied : undefined, reviewerSecret)) {
-            reply.code(401).send({ code: 'UNAUTHORIZED', message: 'Reviewer access required', requestId: request.id });
-        }
-    });
     app.post('/api/datasets', async (request) => {
         const body = recordsBody.parse(request.body);
         return await store.createDataset({

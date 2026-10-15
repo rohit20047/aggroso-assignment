@@ -27,17 +27,14 @@ type HistoryEvent = { action: string; entity_id: string; detail_json: string; cr
 type WorkbenchState = { datasetId: string | null; planId: string | null; dryRunId: string | null; approved: boolean; planNeedsRefresh: boolean; executionId: string | null; executionStatus: string | null; activeExecutionId: string | null; activeExecutionDatasetId: string | null };
 
 const steps = ['Inputs', 'Mapping plan', 'Dry run', 'Approval', 'Reconciliation'];
-class ApiError extends Error {
-  constructor(message: string, readonly status: number) { super(message); }
-}
-async function api<T>(path: string, secret: string, method = 'GET', body?: unknown): Promise<T> {
+async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(path, {
     method,
-    headers: { ...(secret ? { 'x-reviewer-key': secret } : {}), ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+    headers: { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const payload = await response.json().catch(() => ({})) as { message?: string };
-  if (!response.ok) throw new ApiError(payload.message ?? `Request failed (${response.status})`, response.status);
+  if (!response.ok) throw new Error(payload.message ?? `Request failed (${response.status})`);
   return payload as T;
 }
 
@@ -46,8 +43,6 @@ function Metric({ label, value, tone }: { label: string; value: number | string;
 }
 
 export default function App() {
-  const [secret, setSecret] = useState(() => sessionStorage.getItem('reviewerKey') ?? '');
-  const [ready, setReady] = useState(() => sessionStorage.getItem('workbenchReady') === 'true');
   const [step, setStep] = useState(0);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -79,25 +74,24 @@ export default function App() {
   const [targetRows, setTargetRows] = useState<Record<string, unknown>[]>([]);
 
   useEffect(() => {
-    if (!ready) return;
     let live = true;
     (async () => {
       try {
-        const sample = await api<MigrationInput>('/api/sample', secret);
+        const sample = await api<MigrationInput>('/api/sample');
         if (!live) return;
         setSourceText(JSON.stringify(sample.records, null, 2));
         setSourceSchemaText(JSON.stringify(sample.sourceSchema, null, 2));
         setTargetSchemaText(JSON.stringify(sample.targetSchema, null, 2));
         setSelectedRules(sample.allowedRules);
-        const catalog = await api<{ rules: Rule[] }>('/api/rules', secret);
+        const catalog = await api<{ rules: Rule[] }>('/api/rules');
         if (live) setRuleCatalog(catalog.rules);
-        const current = await api<WorkbenchState>('/api/state', secret);
+        const current = await api<WorkbenchState>('/api/state');
         if (!live) return;
         setStep(current.executionId ? 4 : current.approved ? 3 : current.dryRunId ? 2 : current.planId ? 1 : 0);
         if (current.datasetId) {
-          const saved = await api<Dataset>(`/api/datasets/${current.datasetId}`, secret);
-          const schemaDetails = await api<Schemas>(`/api/datasets/${current.datasetId}/schemas`, secret);
-          const versions = await api<{ versions: PlanVersion[] }>(`/api/datasets/${current.datasetId}/plans`, secret);
+          const saved = await api<Dataset>(`/api/datasets/${current.datasetId}`);
+          const schemaDetails = await api<Schemas>(`/api/datasets/${current.datasetId}/schemas`);
+          const versions = await api<{ versions: PlanVersion[] }>(`/api/datasets/${current.datasetId}/plans`);
           if (live) {
             setDataset({ ...saved, count: saved.records?.length }); setSchemas(schemaDetails); setPlanVersions(versions.versions);
             if (saved.input) {
@@ -109,45 +103,37 @@ export default function App() {
           }
         }
         if (current.planId) {
-          const saved = await api<SavedPlan>(`/api/plans/${current.planId}`, secret);
-          const details = await api<{ proposal: Proposal | null }>(`/api/plans/${current.planId}/proposal`, secret);
+          const saved = await api<SavedPlan>(`/api/plans/${current.planId}`);
+          const details = await api<{ proposal: Proposal | null }>(`/api/plans/${current.planId}/proposal`);
           if (live) { setPlan(saved); setProposal(details.proposal); }
         }
         if (current.dryRunId) {
-          const saved = await api<DryRun>(`/api/dry-runs/${current.dryRunId}`, secret);
+          const saved = await api<DryRun>(`/api/dry-runs/${current.dryRunId}`);
           if (live) setDryRun(saved);
         }
         if (live) { setApproved(current.approved); setPlanNeedsRefresh(current.planNeedsRefresh); }
         if (current.executionId) {
-          const rec = await api<Reconciliation>(`/api/executions/${current.executionId}/reconciliation`, secret);
+          const rec = await api<Reconciliation>(`/api/executions/${current.executionId}/reconciliation`);
           if (live) { setExecution({ id: current.executionId, status: current.executionStatus ?? 'unknown' }); setReconciliation(rec); }
         }
         if (current.activeExecutionId && current.activeExecutionDatasetId && current.activeExecutionId !== current.executionId) {
           const [rec, schema] = await Promise.all([
-            api<Reconciliation>(`/api/executions/${current.activeExecutionId}/reconciliation`, secret),
-            api<Schemas>(`/api/datasets/${current.activeExecutionDatasetId}/schemas`, secret),
+            api<Reconciliation>(`/api/executions/${current.activeExecutionId}/reconciliation`),
+            api<Schemas>(`/api/datasets/${current.activeExecutionDatasetId}/schemas`),
           ]);
           if (live) { setPriorActive({ id: current.activeExecutionId, status: 'committed' }); setPriorReconciliation(rec); setPriorTargetSchema(schema.target); }
         }
-        const events = await api<{ events: HistoryEvent[] }>('/api/history', secret);
-        const target = await api<{ rows: Record<string, unknown>[] }>('/api/target', secret);
+        const events = await api<{ events: HistoryEvent[] }>('/api/history');
+        const target = await api<{ rows: Record<string, unknown>[] }>('/api/target');
         if (live) { setHistory(events.events); setTargetRows(target.rows); }
       } catch (cause) {
         if (live) reportError(cause);
       }
     })();
     return () => { live = false; };
-  }, [ready, secret]);
+  }, []);
 
   function reportError(cause: unknown) {
-    if (cause instanceof ApiError && cause.status === 401) {
-      sessionStorage.removeItem('reviewerKey');
-      sessionStorage.removeItem('workbenchReady');
-      setReady(false);
-      setSecret('');
-      setError('Reviewer access key is missing or incorrect. Copy REVIEWER_ACCESS_SECRET from Render and try again.');
-      return;
-    }
     setError(cause instanceof Error ? cause.message : 'Unexpected error');
   }
 
@@ -159,27 +145,15 @@ export default function App() {
   }
 
   async function refreshResults(executionId?: string) {
-    const events = await api<{ events: HistoryEvent[] }>('/api/history', secret);
-    const target = await api<{ rows: Record<string, unknown>[] }>('/api/target', secret);
+    const events = await api<{ events: HistoryEvent[] }>('/api/history');
+    const target = await api<{ rows: Record<string, unknown>[] }>('/api/target');
     setHistory(events.events); setTargetRows(target.rows);
-    if (executionId) setReconciliation(await api<Reconciliation>(`/api/executions/${executionId}/reconciliation`, secret));
+    if (executionId) setReconciliation(await api<Reconciliation>(`/api/executions/${executionId}/reconciliation`));
   }
 
   async function refreshPlanVersions(datasetId: string) {
-    const result = await api<{ versions: PlanVersion[] }>(`/api/datasets/${datasetId}/plans`, secret);
+    const result = await api<{ versions: PlanVersion[] }>(`/api/datasets/${datasetId}/plans`);
     setPlanVersions(result.versions);
-  }
-
-  function enterWorkbench() {
-    if (busy) return;
-    void action('checking-access', async () => {
-      const key = secret.trim();
-      await api<WorkbenchState>('/api/state', key);
-      sessionStorage.setItem('reviewerKey', key);
-      sessionStorage.setItem('workbenchReady', 'true');
-      setSecret(key);
-      setReady(true);
-    });
   }
 
   function loadDataset() {
@@ -190,8 +164,8 @@ export default function App() {
         records: JSON.parse(sourceText) as unknown,
         allowedRules: selectedRules,
       };
-      const saved = await api<Dataset>('/api/datasets', secret, 'POST', input);
-      const schemaDetails = await api<Schemas>(`/api/datasets/${saved.id}/schemas`, secret);
+      const saved = await api<Dataset>('/api/datasets', 'POST', input);
+      const schemaDetails = await api<Schemas>(`/api/datasets/${saved.id}/schemas`);
       setDataset({ ...saved, records: input.records as SourceRecord[], input: input as MigrationInput });
       setSchemas(schemaDetails);
       setPlanVersions([]);
@@ -205,7 +179,7 @@ export default function App() {
 
   function fillSample() {
     void action('sample', async () => {
-      const sample = await api<MigrationInput>('/api/sample', secret);
+      const sample = await api<MigrationInput>('/api/sample');
       setSourceSchemaText(JSON.stringify(sample.sourceSchema, null, 2));
       setTargetSchemaText(JSON.stringify(sample.targetSchema, null, 2));
       setSourceText(JSON.stringify(sample.records, null, 2));
@@ -217,7 +191,7 @@ export default function App() {
   function generateProposal(note = '', basePlanId?: string) {
     if (!dataset) return;
     void action('proposing', async () => {
-      const saved = await api<{ planId: string; planVersion: number; proposal: Proposal & { plan: PlanData }; dryRun: DryRun }>(`/api/datasets/${dataset.id}/proposals`, secret, 'POST', { note, basePlanId });
+      const saved = await api<{ planId: string; planVersion: number; proposal: Proposal & { plan: PlanData }; dryRun: DryRun }>(`/api/datasets/${dataset.id}/proposals`, 'POST', { note, basePlanId });
       setPlan({ id: saved.planId, version: saved.planVersion, plan: saved.proposal.plan });
       await refreshPlanVersions(dataset.id);
       setProposal(saved.proposal); setDryRun(saved.dryRun); setApproved(false); setPlanNeedsRefresh(false); setExecution(null); setReconciliation(null);
@@ -228,15 +202,15 @@ export default function App() {
 
   function inspectVersion(id: string) {
     void action('inspecting', async () => {
-      setInspectedVersion(await api<SavedPlan>(`/api/plans/${id}`, secret));
+      setInspectedVersion(await api<SavedPlan>(`/api/plans/${id}`));
     });
   }
 
   function approvePlan() {
     if (!plan || !dryRun) return;
     void action('approving', async () => {
-      const { digest } = await api<{ digest: string }>(`/api/plans/${plan.id}/approval-digest?dryRunId=${dryRun.id}`, secret);
-      await api(`/api/plans/${plan.id}/approve`, secret, 'POST', { dryRunId: dryRun.id, digest, actor, acknowledgeRejected: acknowledge, answers });
+      const { digest } = await api<{ digest: string }>(`/api/plans/${plan.id}/approval-digest?dryRunId=${dryRun.id}`);
+      await api(`/api/plans/${plan.id}/approve`, 'POST', { dryRunId: dryRun.id, digest, actor, acknowledgeRejected: acknowledge, answers });
       setApproved(true); setNotice('This exact plan and dry run are approved for execution.');
     });
   }
@@ -244,7 +218,7 @@ export default function App() {
   function executePlan() {
     if (!plan) return;
     void action('executing', async () => {
-      const result = await api<Execution>(`/api/plans/${plan.id}/execute`, secret, 'POST');
+      const result = await api<Execution>(`/api/plans/${plan.id}/execute`, 'POST');
       setExecution(result); setStep(4);
       setPriorActive(null); setPriorReconciliation(null); setPriorTargetSchema([]);
       await refreshResults(result.id);
@@ -256,9 +230,9 @@ export default function App() {
     const selected = execution ?? priorActive;
     if (!selected) return;
     void action('retrying', async () => {
-      const result = await api<Execution>(`/api/executions/${selected.id}/retry`, secret, 'POST');
+      const result = await api<Execution>(`/api/executions/${selected.id}/retry`, 'POST');
       if (execution) { setExecution(result); await refreshResults(result.id); }
-      else { setPriorActive(result); setPriorReconciliation(await api<Reconciliation>(`/api/executions/${result.id}/reconciliation`, secret)); await refreshResults(); }
+      else { setPriorActive(result); setPriorReconciliation(await api<Reconciliation>(`/api/executions/${result.id}/reconciliation`)); await refreshResults(); }
       setNotice(`Retry completed with ${result.additionalInserts} additional inserts.`);
     });
   }
@@ -267,7 +241,7 @@ export default function App() {
     const selected = execution ?? priorActive;
     if (!selected) return;
     void action('rolling-back', async () => {
-      const result = await api<{ status: string; deleted: number }>(`/api/executions/${selected.id}/rollback`, secret, 'POST');
+      const result = await api<{ status: string; deleted: number }>(`/api/executions/${selected.id}/rollback`, 'POST');
       if (execution) { setExecution({ ...execution, status: result.status }); await refreshResults(execution.id); }
       else { setPriorActive(null); setPriorReconciliation(null); setPriorTargetSchema([]); setApproved(false); setPlanNeedsRefresh(true); await refreshResults(); }
       setNotice(`Rollback removed ${result.deleted} rows owned by this execution.`);
@@ -277,17 +251,6 @@ export default function App() {
   const shownExecution = execution ?? priorActive;
   const shownReconciliation = execution ? reconciliation : priorReconciliation;
   const shownTargetSchema = execution ? dataset?.input?.targetSchema ?? [] : priorTargetSchema;
-
-  if (!ready) return <main className="access-shell"><section className="access-card">
-    <div className="brand-mark">↗</div><p className="eyebrow">DATA MIGRATION WORKBENCH</p>
-    <h1>Plan confidently.<br />Move data safely.</h1>
-    <p className="muted">Review an AI-proposed mapping, test it against a small dataset, and approve before any records move.</p>
-    <label className="field-label" htmlFor="reviewer-key">Reviewer access key</label>
-    <input id="reviewer-key" type="password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Enter key if configured" onKeyDown={(event) => { if (event.key === 'Enter') enterWorkbench(); }} />
-    {error && <p role="alert">{error}</p>}
-    <button className="primary full" onClick={enterWorkbench} disabled={Boolean(busy)}>{busy === 'checking-access' ? 'Checking access…' : <>Open workbench <span>→</span></>}</button>
-    <p className="fine-print">The key stays in this browser session. The local development server may allow access without one.</p>
-  </section></main>;
 
   return <div className="app-shell">
     <aside className="sidebar">

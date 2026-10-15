@@ -36,7 +36,7 @@ describe('reviewer API', () => {
         return { model: 'fake-test-model', message: { content: JSON.stringify({ plan: samplePlan, summary: 'Complete mapping', rationales: samplePlan.mappings.map(({ target, sources }) => ({ target, reason: 'Selected by AI', evidence: sources.join(', ') })), risks: [], assumptions: [], questions: [] }) } };
       },
     };
-    const app = buildApp(store, undefined, new AgentPlanner(store, client));
+    const app = buildApp(store, new AgentPlanner(store, client));
     try {
       const dataset = store.createDataset(sampleRecords);
       const response = await app.inject({ method: 'POST', url: `/api/datasets/${dataset.id}/proposals`, payload: {} });
@@ -51,51 +51,46 @@ describe('reviewer API', () => {
     }
   });
 
-  it('enforces reviewer access and approval before executing', async () => {
+  it('allows public access and still requires approval before executing', async () => {
     const store = new MigrationStore(':memory:');
-    const app = buildApp(store, 'test-only-secret');
-    const headers = { 'x-reviewer-key': 'test-only-secret' };
+    const app = buildApp(store);
     try {
-      const unauthorized = await app.inject({ method: 'GET', url: '/api/history' });
-      expect(unauthorized.statusCode).toBe(401);
-      for (const key of ['', 'wrong-key', ' test-only-secret ']) {
-        const denied = await app.inject({ method: 'GET', url: '/api/state', headers: { 'x-reviewer-key': key } });
-        expect(denied.statusCode).toBe(401);
+      for (const url of ['/api/history', '/api/state', '/api/sample', '/api/rules', '/api/target']) {
+        expect((await app.inject({ method: 'GET', url })).statusCode).toBe(200);
       }
-      expect((await app.inject({ method: 'GET', url: '/api/state', headers })).statusCode).toBe(200);
 
-      const datasetResponse = await app.inject({ method: 'POST', url: '/api/datasets', headers, payload: { records: sampleRecords } });
+      const datasetResponse = await app.inject({ method: 'POST', url: '/api/datasets', payload: { records: sampleRecords } });
       expect(datasetResponse.statusCode).toBe(200);
       const dataset = datasetResponse.json() as { id: string };
-      const planResponse = await app.inject({ method: 'POST', url: `/api/datasets/${dataset.id}/plans`, headers, payload: { plan: samplePlan } });
+      const planResponse = await app.inject({ method: 'POST', url: `/api/datasets/${dataset.id}/plans`, payload: { plan: samplePlan } });
       expect(planResponse.statusCode).toBe(200);
       const plan = planResponse.json() as { id: string };
 
-      const blocked = await app.inject({ method: 'POST', url: `/api/plans/${plan.id}/execute`, headers });
+      const blocked = await app.inject({ method: 'POST', url: `/api/plans/${plan.id}/execute` });
       expect(blocked.statusCode).toBe(409);
       expect(store.targetCount()).toBe(0);
 
-      const runResponse = await app.inject({ method: 'POST', url: `/api/plans/${plan.id}/dry-runs`, headers });
+      const runResponse = await app.inject({ method: 'POST', url: `/api/plans/${plan.id}/dry-runs` });
       const run = runResponse.json() as { id: string; result: { accepted: number; rejected: number } };
       expect(run.result).toMatchObject({ accepted: 14, rejected: 6 });
 
-      const digestResponse = await app.inject({ method: 'GET', url: `/api/plans/${plan.id}/approval-digest?dryRunId=${run.id}`, headers });
+      const digestResponse = await app.inject({ method: 'GET', url: `/api/plans/${plan.id}/approval-digest?dryRunId=${run.id}` });
       const approvalDigest = (digestResponse.json() as { digest: string }).digest;
-      const approval = await app.inject({ method: 'POST', url: `/api/plans/${plan.id}/approve`, headers, payload: { dryRunId: run.id, digest: approvalDigest, actor: 'test-reviewer', acknowledgeRejected: true } });
+      const approval = await app.inject({ method: 'POST', url: `/api/plans/${plan.id}/approve`, payload: { dryRunId: run.id, digest: approvalDigest, actor: 'test-reviewer', acknowledgeRejected: true } });
       expect(approval.statusCode).toBe(200);
 
-      const execution = await app.inject({ method: 'POST', url: `/api/plans/${plan.id}/execute`, headers });
+      const execution = await app.inject({ method: 'POST', url: `/api/plans/${plan.id}/execute` });
       expect(execution.statusCode).toBe(200);
       const result = execution.json() as { id: string; inserted: number };
       expect(result.inserted).toBe(14);
 
-      const retry = await app.inject({ method: 'POST', url: `/api/executions/${result.id}/retry`, headers });
+      const retry = await app.inject({ method: 'POST', url: `/api/executions/${result.id}/retry` });
       expect(retry.json()).toMatchObject({ additionalInserts: 0 });
 
-      const reconciliation = await app.inject({ method: 'GET', url: `/api/executions/${result.id}/reconciliation`, headers });
+      const reconciliation = await app.inject({ method: 'GET', url: `/api/executions/${result.id}/reconciliation` });
       expect(reconciliation.json()).toMatchObject({ matched: true, ownedCount: 14 });
 
-      const rollback = await app.inject({ method: 'POST', url: `/api/executions/${result.id}/rollback`, headers });
+      const rollback = await app.inject({ method: 'POST', url: `/api/executions/${result.id}/rollback` });
       expect(rollback.json()).toMatchObject({ deleted: 14, targetCount: 0 });
     } finally {
       await app.close();

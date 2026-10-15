@@ -9,11 +9,6 @@ import { PostgresStore } from './postgres-store.js';
 
 const databasePath = process.env.DATABASE_PATH ?? './migration-workbench.db';
 const port = Number(process.env.PORT ?? 3000);
-const secret = process.env.REVIEWER_ACCESS_SECRET;
-
-if (process.env.NODE_ENV === 'production' && !secret) {
-  throw new Error('REVIEWER_ACCESS_SECRET is required in production');
-}
 
 if (process.env.RENDER && !process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL is required on Render; configure a persistent Neon PostgreSQL database');
@@ -24,7 +19,7 @@ const store = process.env.DATABASE_URL
 const agent = process.env.GEMINI_API_KEY
   ? new AgentPlanner(store, new GeminiClient(process.env.GEMINI_API_KEY, process.env.GEMINI_MODEL ?? 'gemini-3.5-flash-lite'))
   : undefined;
-const app = buildApp(store, secret, agent);
+const app = buildApp(store, agent);
 const webRoot = resolve('dist-web');
 if (existsSync(webRoot)) {
   await app.register(fastifyStatic, { root: webRoot, prefix: '/' });

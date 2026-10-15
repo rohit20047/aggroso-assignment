@@ -143,20 +143,19 @@ describe('hosted PostgreSQL workflow', () => {
         }) } };
       },
     };
-    const app = buildApp(store, 'test-key', new AgentPlanner(store, client));
+    const app = buildApp(store, new AgentPlanner(store, client));
     cleanup.push(() => app.close());
-    const headers = { 'x-reviewer-key': 'test-key' };
-    expect((await app.inject({ method: 'GET', url: '/api/state' })).statusCode).toBe(401);
-    const response = await app.inject({ method: 'POST', url: `/api/datasets/${dataset.id}/proposals`, headers, payload: {} });
+    expect((await app.inject({ method: 'GET', url: '/api/state' })).statusCode).toBe(200);
+    const response = await app.inject({ method: 'POST', url: `/api/datasets/${dataset.id}/proposals`, payload: {} });
     expect(response.statusCode).toBe(200);
     const result = response.json();
     expect(result.dryRun.result.accepted).toBe(14);
     const digest = await store.approvalDigest(result.planId, result.dryRun.id);
     await expect(store.approve(result.planId, result.dryRun.id, digest, 'reviewer', true)).rejects.toThrow('Blocking question');
     await store.approve(result.planId, result.dryRun.id, digest, 'reviewer', true, { email: 'Confirmed' });
-    const execution = await app.inject({ method: 'POST', url: `/api/plans/${result.planId}/execute`, headers });
+    const execution = await app.inject({ method: 'POST', url: `/api/plans/${result.planId}/execute` });
     expect(execution.statusCode).toBe(200);
     expect(execution.json().inserted).toBe(14);
-    expect((await app.inject({ method: 'GET', url: '/api/target', headers })).json().rows).toHaveLength(14);
+    expect((await app.inject({ method: 'GET', url: '/api/target' })).json().rows).toHaveLength(14);
   }, 30_000);
 });
