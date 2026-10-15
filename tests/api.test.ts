@@ -58,6 +58,11 @@ describe('reviewer API', () => {
     try {
       const unauthorized = await app.inject({ method: 'GET', url: '/api/history' });
       expect(unauthorized.statusCode).toBe(401);
+      for (const key of ['', 'wrong-key', ' test-only-secret ']) {
+        const denied = await app.inject({ method: 'GET', url: '/api/state', headers: { 'x-reviewer-key': key } });
+        expect(denied.statusCode).toBe(401);
+      }
+      expect((await app.inject({ method: 'GET', url: '/api/state', headers })).statusCode).toBe(200);
 
       const datasetResponse = await app.inject({ method: 'POST', url: '/api/datasets', headers, payload: { records: sampleRecords } });
       expect(datasetResponse.statusCode).toBe(200);

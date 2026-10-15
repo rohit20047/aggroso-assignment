@@ -27,6 +27,9 @@ type HistoryEvent = { action: string; entity_id: string; detail_json: string; cr
 type WorkbenchState = { datasetId: string | null; planId: string | null; dryRunId: string | null; approved: boolean; planNeedsRefresh: boolean; executionId: string | null; executionStatus: string | null; activeExecutionId: string | null; activeExecutionDatasetId: string | null };
 
 const steps = ['Inputs', 'Mapping plan', 'Dry run', 'Approval', 'Reconciliation'];
+class ApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
 async function api<T>(path: string, secret: string, method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(path, {
     method,
@@ -34,7 +37,7 @@ async function api<T>(path: string, secret: string, method = 'GET', body?: unkno
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const payload = await response.json().catch(() => ({})) as { message?: string };
-  if (!response.ok) throw new Error(payload.message ?? `Request failed (${response.status})`);
+  if (!response.ok) throw new ApiError(payload.message ?? `Request failed (${response.status})`, response.status);
   return payload as T;
 }
 
@@ -130,16 +133,28 @@ export default function App() {
         const target = await api<{ rows: Record<string, unknown>[] }>('/api/target', secret);
         if (live) { setHistory(events.events); setTargetRows(target.rows); }
       } catch (cause) {
-        if (live) setError(cause instanceof Error ? cause.message : 'Unable to restore the workbench');
+        if (live) reportError(cause);
       }
     })();
     return () => { live = false; };
   }, [ready, secret]);
 
+  function reportError(cause: unknown) {
+    if (cause instanceof ApiError && cause.status === 401) {
+      sessionStorage.removeItem('reviewerKey');
+      sessionStorage.removeItem('workbenchReady');
+      setReady(false);
+      setSecret('');
+      setError('Reviewer access key is missing or incorrect. Copy REVIEWER_ACCESS_SECRET from Render and try again.');
+      return;
+    }
+    setError(cause instanceof Error ? cause.message : 'Unexpected error');
+  }
+
   async function action(label: string, work: () => Promise<void>) {
     setBusy(label); setError(''); setNotice('');
     try { await work(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Unexpected error'); }
+    catch (cause) { reportError(cause); }
     finally { setBusy(''); }
   }
 
@@ -156,9 +171,15 @@ export default function App() {
   }
 
   function enterWorkbench() {
-    sessionStorage.setItem('reviewerKey', secret);
-    sessionStorage.setItem('workbenchReady', 'true');
-    setReady(true);
+    if (busy) return;
+    void action('checking-access', async () => {
+      const key = secret.trim();
+      await api<WorkbenchState>('/api/state', key);
+      sessionStorage.setItem('reviewerKey', key);
+      sessionStorage.setItem('workbenchReady', 'true');
+      setSecret(key);
+      setReady(true);
+    });
   }
 
   function loadDataset() {
@@ -263,7 +284,8 @@ export default function App() {
     <p className="muted">Review an AI-proposed mapping, test it against a small dataset, and approve before any records move.</p>
     <label className="field-label" htmlFor="reviewer-key">Reviewer access key</label>
     <input id="reviewer-key" type="password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Enter key if configured" onKeyDown={(event) => { if (event.key === 'Enter') enterWorkbench(); }} />
-    <button className="primary full" onClick={enterWorkbench}>Open workbench <span>→</span></button>
+    {error && <p role="alert">{error}</p>}
+    <button className="primary full" onClick={enterWorkbench} disabled={Boolean(busy)}>{busy === 'checking-access' ? 'Checking access…' : <>Open workbench <span>→</span></>}</button>
     <p className="fine-print">The key stays in this browser session. The local development server may allow access without one.</p>
   </section></main>;
 
